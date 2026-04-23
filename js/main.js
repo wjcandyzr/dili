@@ -26,6 +26,9 @@ camera.position.set(55, 45, 55);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = false;
 canvasWrap.appendChild(renderer.domElement);
 
@@ -44,15 +47,21 @@ controls.minDistance = 15;
 controls.maxDistance = 180;
 controls.maxPolarAngle = Math.PI * 0.49;
 
-// Lighting
-const hemi = new THREE.HemisphereLight(0xffffff, 0x445566, 0.9);
+// Lighting — warm sun + cool sky fill gives natural terrain shading
+const hemi = new THREE.HemisphereLight(0xcfe4ff, 0x4a4535, 0.75);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff0d6, 1.0);
+
+const sun = new THREE.DirectionalLight(0xfff2d6, 1.35);
 sun.position.set(40, 60, 30);
 scene.add(sun);
-const fill = new THREE.DirectionalLight(0x88aacc, 0.25);
-fill.position.set(-30, 20, -20);
+
+const fill = new THREE.DirectionalLight(0x7aa6d6, 0.35);
+fill.position.set(-30, 25, -20);
 scene.add(fill);
+
+const rim = new THREE.DirectionalLight(0xffd9a8, 0.2);
+rim.position.set(0, 20, -60);
+scene.add(rim);
 
 // === State ===
 let currentTerrain = null;

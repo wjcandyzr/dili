@@ -195,6 +195,7 @@ export const landforms = [
       size: SIZE, segments: SEG,
       colorStops: palettes.plain,
       heightRange: [-0.5, 1.5],
+      microDetail: 0.05,
       heightFn: (x, z) => {
         return fbm(x * 0.05, z * 0.05, { octaves: 3, gain: 0.3 }) * 0.6 + 0.2;
       },
@@ -326,6 +327,7 @@ export const landforms = [
         size: SIZE, segments: SEG,
         colorStops: palettes.delta,
         heightRange: [-1, 6],
+        microDetail: 0.05,
         water: { level: -0.4, color: '#2b6fa0' },
         extras: [river, river2, river3],
         heightFn: (x, z) => {
@@ -467,12 +469,15 @@ export const landforms = [
       size: SIZE, segments: SEG,
       colorStops: palettes.desert,
       heightRange: [0, 5],
+      microDetail: 0.08,
       heightFn: (x, z) => {
-        // barchan-like dunes: asymmetric waves
-        const wave = Math.sin(x * 0.12 + Math.sin(z * 0.06) * 2) * 1.5;
-        const wave2 = Math.sin(z * 0.08 + x * 0.03) * 1.0;
-        const grain = fbm(x * 0.25, z * 0.25, { octaves: 3 }) * 0.4;
-        return 2 + wave + wave2 * 0.6 + grain;
+        // Warp the wave field with noise so dunes bend organically.
+        const warpX = fbm(x * 0.03, z * 0.03, { octaves: 3, seed: 4 }) * 6;
+        const warpZ = fbm(x * 0.03 + 50, z * 0.03 + 50, { octaves: 3, seed: 9 }) * 6;
+        const wave = Math.sin((x + warpX) * 0.11 + Math.sin((z + warpZ) * 0.05) * 1.6) * 1.4;
+        const wave2 = Math.sin((z + warpZ) * 0.07 + (x + warpX) * 0.02) * 0.8;
+        const macro = fbm(x * 0.02, z * 0.02, { octaves: 3, seed: 21 }) * 1.2;
+        return 2 + wave + wave2 + macro;
       },
     },
     labels: [
@@ -506,8 +511,9 @@ export const landforms = [
         const uFloor = Math.pow(Math.abs(x) / 12, 2) * 6;
         const carved = valleyStrength > 0.1 ? uFloor + 1 : base;
         const h = valleyStrength > 0.1 ? Math.min(base, carved) : base;
-        // add ice crevasse lines
-        const crev = Math.sin(z * 0.4) * 0.15 * valleyStrength;
+        // ice crevasses: warped line field (transverse to flow direction)
+        const crevWarp = fbm(x * 0.1, z * 0.05, { octaves: 2, seed: 5 }) * 2;
+        const crev = Math.sin((z + crevWarp) * 0.55) * 0.18 * valleyStrength;
         return h + crev + 0.5;
       },
     },

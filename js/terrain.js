@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { fbm } from './noise.js';
 
 function hexToRgb(hex) {
   const h = hex.replace('#', '');
@@ -43,31 +44,44 @@ function sampleGradient(stops, t) {
 export function buildTerrain(config) {
   const {
     size = 100,
-    segments = 180,
+    segments = 280,
     heightFn,
     colorStops,
     heightRange,
     water = null,
-    flatShading = true,
+    flatShading = false,
     extras = [],
+    aoStrength = 0.35,
+    microDetail = 0.18,       // amplitude of fine surface noise
+    microFrequency = 0.35,    // spatial frequency of fine detail
+    microSeed = 91,
   } = config;
 
   const group = new THREE.Group();
 
   const geo = new THREE.PlaneGeometry(size, size, segments, segments);
-  geo.rotateX(-Math.PI / 2); // lay flat on XZ plane
+  geo.rotateX(-Math.PI / 2);
 
   const pos = geo.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
+  const posArr = pos.array;          // direct typed array access
+  const count = pos.count;
+  const colors = new Float32Array(count * 3);
 
   let yMin = Infinity;
   let yMax = -Infinity;
 
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const y = heightFn(x, z);
-    pos.setY(i, y);
+  // Height + micro detail — write directly into typed array.
+  for (let i = 0; i < count; i++) {
+    const base = i * 3;
+    const x = posArr[base];
+    const z = posArr[base + 2];
+    let y = heightFn(x, z);
+    if (microDetail > 0) {
+      y += fbm(x * microFrequency, z * microFrequency, {
+        octaves: 3, gain: 0.5, seed: microSeed,
+      }) * microDetail;
+    }
+    posArr[base + 1] = y;
     if (y < yMin) yMin = y;
     if (y > yMax) yMax = y;
   }
@@ -75,29 +89,64 @@ export function buildTerrain(config) {
   const [minH, maxH] = heightRange || [yMin, yMax];
   const range = maxH - minH || 1;
 
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
-    const t = Math.max(0, Math.min(1, (y - minH) / range));
+  // Precompute gradient lookup table for fast coloring (256 entries).
+  const lutSize = 256;
+  const lut = new Float32Array(lutSize * 3);
+  for (let i = 0; i < lutSize; i++) {
+    const t = i / (lutSize - 1);
     const c = sampleGradient(colorStops, t);
-    colors[i * 3] = c.r;
-    colors[i * 3 + 1] = c.g;
-    colors[i * 3 + 2] = c.b;
+    lut[i * 3] = c.r;
+    lut[i * 3 + 1] = c.g;
+    lut[i * 3 + 2] = c.b;
   }
 
+  // Ambient occlusion approximation: compare each vertex height to the
+  // average of its 4 orthogonal neighbors. Crevices (below average) get darkened.
+  const W = segments + 1;
+  const cellSize = size / segments;
+  for (let j = 0; j < W; j++) {
+    for (let i = 0; i < W; i++) {
+      const idx = j * W + i;
+      const y = posArr[idx * 3 + 1];
+
+      // 4-neighbor relative height average (cheaper than 8 neighbors)
+      let sum = 0;
+      let n = 0;
+      if (i > 0)     { sum += posArr[(idx - 1) * 3 + 1]; n++; }
+      if (i < W - 1) { sum += posArr[(idx + 1) * 3 + 1]; n++; }
+      if (j > 0)     { sum += posArr[(idx - W) * 3 + 1]; n++; }
+      if (j < W - 1) { sum += posArr[(idx + W) * 3 + 1]; n++; }
+      const avg = n ? sum / n : y;
+      const rel = (avg - y) / cellSize;           // >0 when vertex is lower than surroundings
+      const ao = rel > 0 ? Math.min(1, rel * 0.9) : 0;
+
+      const t = (y - minH) / range;
+      const tt = t < 0 ? 0 : t > 1 ? 1 : t;
+      const li = (tt * (lutSize - 1)) | 0;
+      const lb = li * 3;
+      const darken = 1 - ao * aoStrength;
+
+      const cb = idx * 3;
+      colors[cb]     = lut[lb]     * darken;
+      colors[cb + 1] = lut[lb + 1] * darken;
+      colors[cb + 2] = lut[lb + 2] * darken;
+    }
+  }
+
+  pos.needsUpdate = true;
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
 
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     flatShading,
-    roughness: 0.95,
+    roughness: 0.92,
     metalness: 0.0,
+    envMapIntensity: 0.6,
   });
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'terrain';
-  mesh.receiveShadow = true;
-  mesh.castShadow = false;
   group.add(mesh);
 
   if (water) {
@@ -106,9 +155,10 @@ export function buildTerrain(config) {
     const waterMat = new THREE.MeshStandardMaterial({
       color: water.color || '#2a7ab8',
       transparent: true,
-      opacity: 0.72,
-      roughness: 0.25,
-      metalness: 0.1,
+      opacity: 0.78,
+      roughness: 0.15,
+      metalness: 0.25,
+      envMapIntensity: 1.0,
     });
     const waterMesh = new THREE.Mesh(waterGeo, waterMat);
     waterMesh.position.y = water.level ?? 0;
