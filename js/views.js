@@ -40,6 +40,10 @@ export class ViewManager {
     const terrain = this._getTerrainMesh(terrainGroup);
     if (!terrain) return;
 
+    // Decorations only belong in 3D view
+    const decor = terrainGroup.children.find(c => c.name === 'decorations');
+    if (decor) decor.visible = (mode === '3d');
+
     if (mode === '3d') {
       this._restoreOriginal(terrain);
       terrainGroup.visible = true;

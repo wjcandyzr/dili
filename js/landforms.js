@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { fbm, valueNoise2D, ridge } from './noise.js';
 import { makeLava, makeRiverPath } from './terrain.js';
+import {
+  makePineTree, makeBroadleafTree, makePalmTree, makeDeadTree, makeCactus,
+  makeRock, makeHouse, makeCloud, makeSmokePlume, makeIceChunk, makeBoat,
+  makePond, scatter,
+} from './decorations.js';
 
 // Color palettes
 const palettes = {
@@ -563,6 +568,374 @@ export const landforms = [
     ],
   },
 ];
+
+// ============================================================
+// Decorations — vegetation, rocks, houses, clouds per landform.
+// Each function receives sampleHeight(x, z) returning final Y at (x,z)
+// and returns a THREE.Group to add on top of the terrain.
+// ============================================================
+
+const decorators = {
+  mountain: (sh) => {
+    const g = new THREE.Group();
+    // Pine trees on lower slopes only
+    g.add(scatter({
+      sampleHeight: sh, count: 70, range: 90, seed: 11,
+      factory: (r) => makePineTree(2 + r() * 1.5),
+      filter: (x, y, z, r) => y > 0 && y < 7 && r() < 0.9,
+      randomScale: [0.8, 1.2],
+    }));
+    // Scattered rocks
+    g.add(scatter({
+      sampleHeight: sh, count: 40, range: 90, seed: 23,
+      factory: (r) => makeRock(0.4 + r() * 0.7, r() < 0.5 ? '#7a7268' : '#6a5a4a'),
+      filter: (x, y, z) => y > 0 && y < 12,
+      offsetY: -0.1,
+      randomScale: [0.7, 1.3],
+    }));
+    // A few snowy cloud puffs high up
+    const cloud = makeCloud(7); cloud.position.set(15, 22, -10); g.add(cloud);
+    const cloud2 = makeCloud(5); cloud2.position.set(-20, 25, 15); g.add(cloud2);
+    return g;
+  },
+
+  plateau: (sh) => {
+    const g = new THREE.Group();
+    g.add(scatter({
+      sampleHeight: sh, count: 35, range: 80, seed: 31,
+      factory: (r) => makeRock(0.5 + r() * 0.9, '#b0986a'),
+      filter: (x, y, z) => y > 4,
+      offsetY: -0.1,
+      randomScale: [0.6, 1.4],
+    }));
+    // Sparse dead/yak-country trees on the top
+    g.add(scatter({
+      sampleHeight: sh, count: 20, range: 70, seed: 33,
+      factory: (r) => makeDeadTree(1.3 + r() * 0.6),
+      filter: (x, y, z) => y > 6,
+      randomScale: [0.8, 1.2],
+    }));
+    const cloud = makeCloud(8); cloud.position.set(10, 18, 0); g.add(cloud);
+    const cloud2 = makeCloud(6); cloud2.position.set(-15, 20, -18); g.add(cloud2);
+    return g;
+  },
+
+  hill: (sh) => {
+    const g = new THREE.Group();
+    // Dense broadleaf forest
+    g.add(scatter({
+      sampleHeight: sh, count: 110, range: 92, seed: 41,
+      factory: (r) => r() < 0.3 ? makePineTree(2 + r()) : makeBroadleafTree(1.8 + r() * 1.2),
+      filter: (x, y) => y > -0.5,
+      randomScale: [0.8, 1.25],
+    }));
+    // A small village cluster
+    g.add(scatter({
+      sampleHeight: sh, count: 5, range: 40, seed: 47,
+      factory: (r) => makeHouse(1.4 + r() * 0.3, r() < 0.5 ? '#a04030' : '#6a4a2a'),
+      filter: (x, y) => y > 0 && y < 4,
+    }));
+    return g;
+  },
+
+  plain: (sh) => {
+    const g = new THREE.Group();
+    // Scattered trees
+    g.add(scatter({
+      sampleHeight: sh, count: 55, range: 94, seed: 51,
+      factory: (r) => makeBroadleafTree(1.8 + r() * 1.0),
+      filter: (x, y) => y > 0,
+      randomScale: [0.8, 1.2],
+    }));
+    // Village
+    g.add(scatter({
+      sampleHeight: sh, count: 10, range: 55, seed: 53,
+      factory: (r) => makeHouse(1.3 + r() * 0.4),
+      filter: (x, y) => y > 0,
+    }));
+    // Farm field patches (green rectangles at low y)
+    const fieldMat = new THREE.MeshStandardMaterial({ color: '#7aa84a', roughness: 1 });
+    const rndF = (seed => { let a = seed; return () => { a = (a * 9301 + 49297) % 233280; return a / 233280; }})(777);
+    for (let i = 0; i < 8; i++) {
+      const w = 6 + rndF() * 5;
+      const h = 6 + rndF() * 5;
+      const x = (rndF() - 0.5) * 80;
+      const z = (rndF() - 0.5) * 80;
+      const y = sh(x, z);
+      if (y < 0) continue;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), fieldMat);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set(x, y + 0.02, z);
+      g.add(plane);
+    }
+    return g;
+  },
+
+  basin: (sh) => {
+    const g = new THREE.Group();
+    // Lake at bottom
+    const lake = makePond(12, '#2b6fa0');
+    lake.position.y = -2.3;
+    g.add(lake);
+    // Trees on rim only
+    g.add(scatter({
+      sampleHeight: sh, count: 45, range: 90, seed: 61,
+      factory: (r) => makePineTree(2 + r() * 1.2),
+      filter: (x, y) => y > 2,
+      randomScale: [0.8, 1.2],
+    }));
+    // A few scattered houses on middle slopes
+    g.add(scatter({
+      sampleHeight: sh, count: 5, range: 70, seed: 67,
+      factory: () => makeHouse(1.3, '#8a4a2a'),
+      filter: (x, y) => y > 0 && y < 3,
+    }));
+    return g;
+  },
+
+  volcano: (sh) => {
+    const g = new THREE.Group();
+    // Smoke plume above crater
+    const smoke = makeSmokePlume(8);
+    smoke.position.set(0, 11, 0);
+    g.add(smoke);
+    // Dead/burnt trees at base
+    g.add(scatter({
+      sampleHeight: sh, count: 25, range: 92, seed: 71,
+      factory: (r) => makeDeadTree(1.3 + r() * 0.6),
+      filter: (x, y) => y < 3 && Math.hypot(x, y) > 18,
+      randomScale: [0.8, 1.3],
+    }));
+    // Scorched rocks
+    g.add(scatter({
+      sampleHeight: sh, count: 30, range: 70, seed: 73,
+      factory: (r) => makeRock(0.4 + r() * 0.9, '#3a2a22'),
+      filter: (x, y, z) => y > 1,
+      offsetY: -0.1,
+      randomScale: [0.7, 1.3],
+    }));
+    return g;
+  },
+
+  canyon: (sh) => {
+    const g = new THREE.Group();
+    // Sparse hardy pines on rim
+    g.add(scatter({
+      sampleHeight: sh, count: 25, range: 90, seed: 81,
+      factory: (r) => makePineTree(1.8 + r()),
+      filter: (x, y) => y > 6,
+      randomScale: [0.7, 1.1],
+    }));
+    // Rocks on canyon walls
+    g.add(scatter({
+      sampleHeight: sh, count: 55, range: 85, seed: 83,
+      factory: (r) => makeRock(0.4 + r() * 0.8, '#a85a38'),
+      filter: (x, y) => true,
+      offsetY: -0.1,
+      randomScale: [0.6, 1.4],
+    }));
+    // Thin river at the bottom of canyon
+    const riverMat = new THREE.MeshStandardMaterial({
+      color: '#3a8ac0', roughness: 0.2, metalness: 0.3, transparent: true, opacity: 0.85,
+    });
+    const riverGeo = new THREE.PlaneGeometry(0.9, 100, 1, 40);
+    const rp = riverGeo.attributes.position;
+    for (let i = 0; i < rp.count; i++) {
+      const z = rp.getY(i);
+      rp.setX(i, rp.getX(i) + Math.sin(z * 0.05) * 8 + Math.sin(z * 0.12) * 3);
+    }
+    riverGeo.computeVertexNormals();
+    const river = new THREE.Mesh(riverGeo, riverMat);
+    river.rotation.x = -Math.PI / 2;
+    river.position.y = -1.7;
+    g.add(river);
+    return g;
+  },
+
+  delta: (sh) => {
+    const g = new THREE.Group();
+    // Reeds/bamboo (small green spikes) along water
+    g.add(scatter({
+      sampleHeight: sh, count: 80, range: 95, seed: 91,
+      factory: (r) => {
+        const reed = new THREE.Mesh(
+          new THREE.ConeGeometry(0.15, 1.2 + r() * 0.5, 4),
+          new THREE.MeshStandardMaterial({ color: '#6a9a4a', roughness: 1 })
+        );
+        reed.position.y = 0.6;
+        return reed;
+      },
+      filter: (x, y) => y > -0.3 && y < 0.8,
+      randomScale: [0.8, 1.3],
+    }));
+    // Broadleaf trees on higher parts
+    g.add(scatter({
+      sampleHeight: sh, count: 30, range: 70, seed: 93,
+      factory: (r) => makeBroadleafTree(1.8 + r()),
+      filter: (x, y) => y > 1,
+      randomScale: [0.8, 1.2],
+    }));
+    // Houses
+    g.add(scatter({
+      sampleHeight: sh, count: 8, range: 60, seed: 95,
+      factory: () => makeHouse(1.3, '#8a4a2a'),
+      filter: (x, y) => y > 0.5,
+    }));
+    // Boats on the water
+    for (let i = 0; i < 4; i++) {
+      const b = makeBoat(1);
+      const x = (Math.random() - 0.5) * 30;
+      const z = 15 + Math.random() * 20;
+      b.position.set(x, -0.2, z);
+      b.rotation.y = Math.random() * Math.PI;
+      g.add(b);
+    }
+    return g;
+  },
+
+  karst: (sh) => {
+    const g = new THREE.Group();
+    // Trees atop smaller peaks + at base
+    g.add(scatter({
+      sampleHeight: sh, count: 60, range: 92, seed: 101,
+      factory: (r) => r() < 0.6 ? makeBroadleafTree(1.5 + r()) : makePineTree(1.8 + r()),
+      filter: (x, y) => y < 1.5 || (y > 3 && y < 7),
+      randomScale: [0.7, 1.2],
+    }));
+    // Reflection pool / rice paddies at base
+    const pond = makePond(14, '#4a9abc'); pond.position.set(-18, -0.15, 18); g.add(pond);
+    const pond2 = makePond(8, '#4a9abc'); pond2.position.set(15, -0.15, -20); g.add(pond2);
+    return g;
+  },
+
+  danxia: (sh) => {
+    const g = new THREE.Group();
+    // Many rocky boulders
+    g.add(scatter({
+      sampleHeight: sh, count: 55, range: 90, seed: 111,
+      factory: (r) => makeRock(0.4 + r() * 1.0, r() < 0.5 ? '#b04030' : '#8a3a28'),
+      filter: () => true,
+      offsetY: -0.15,
+      randomScale: [0.7, 1.5],
+    }));
+    // Very sparse hardy trees
+    g.add(scatter({
+      sampleHeight: sh, count: 12, range: 85, seed: 113,
+      factory: (r) => makePineTree(1.5 + r() * 0.7),
+      filter: (x, y) => y > 0.5 && y < 8,
+      randomScale: [0.7, 1.1],
+    }));
+    return g;
+  },
+
+  desert: (sh) => {
+    const g = new THREE.Group();
+    // Cacti
+    g.add(scatter({
+      sampleHeight: sh, count: 25, range: 92, seed: 121,
+      factory: (r) => makeCactus(1.5 + r() * 0.8),
+      filter: () => true,
+      randomScale: [0.8, 1.3],
+    }));
+    // Oasis: small water patch + palm trees cluster
+    const oasisX = -12, oasisZ = 18;
+    const oasisY = sh(oasisX, oasisZ);
+    const oasis = makePond(5, '#3aa0c8');
+    oasis.position.set(oasisX, oasisY - 0.2, oasisZ);
+    g.add(oasis);
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const r = 4 + Math.random() * 2;
+      const x = oasisX + Math.cos(angle) * r;
+      const z = oasisZ + Math.sin(angle) * r;
+      const y = sh(x, z);
+      const palm = makePalmTree(3.5 + Math.random() * 0.8);
+      palm.position.set(x, y, z);
+      palm.rotation.y = Math.random() * Math.PI * 2;
+      g.add(palm);
+    }
+    // Small oasis 2
+    const ox2 = 20, oz2 = -15;
+    const oy2 = sh(ox2, oz2);
+    const oasis2 = makePond(3, '#3aa0c8');
+    oasis2.position.set(ox2, oy2 - 0.2, oz2);
+    g.add(oasis2);
+    for (let i = 0; i < 3; i++) {
+      const palm = makePalmTree(3 + Math.random() * 0.6);
+      palm.position.set(ox2 + (Math.random() - 0.5) * 6, sh(ox2, oz2), oz2 + (Math.random() - 0.5) * 6);
+      palm.rotation.y = Math.random() * Math.PI * 2;
+      g.add(palm);
+    }
+    return g;
+  },
+
+  glacier: (sh) => {
+    const g = new THREE.Group();
+    // Ice chunks on glacier tongue
+    g.add(scatter({
+      sampleHeight: sh, count: 40, range: 30, seed: 131,
+      factory: (r) => makeIceChunk(0.5 + r() * 0.8),
+      filter: (x, y, z) => Math.abs(x) < 12 && y < 3,
+      offsetY: 0.1,
+      randomScale: [0.7, 1.3],
+    }));
+    // Pines at low base only (below snow line)
+    g.add(scatter({
+      sampleHeight: sh, count: 35, range: 90, seed: 133,
+      factory: (r) => makePineTree(1.8 + r() * 0.8),
+      filter: (x, y) => y < 3 && Math.abs(x) > 14,
+      randomScale: [0.7, 1.1],
+    }));
+    // Rocks at sides
+    g.add(scatter({
+      sampleHeight: sh, count: 25, range: 90, seed: 135,
+      factory: (r) => makeRock(0.4 + r() * 0.6, '#6a6a6a'),
+      filter: (x, y) => y > 2 && Math.abs(x) > 12,
+      offsetY: -0.1,
+      randomScale: [0.7, 1.2],
+    }));
+    const cloud = makeCloud(8); cloud.position.set(0, 22, -15); g.add(cloud);
+    return g;
+  },
+
+  coast: (sh) => {
+    const g = new THREE.Group();
+    // Palm trees on beach and inland
+    g.add(scatter({
+      sampleHeight: sh, count: 30, range: 90, seed: 141,
+      factory: (r) => makePalmTree(3 + r() * 1.2),
+      filter: (x, y) => y > 0.2 && y < 5,
+      randomScale: [0.85, 1.15],
+    }));
+    // Coastal houses
+    g.add(scatter({
+      sampleHeight: sh, count: 7, range: 80, seed: 143,
+      factory: () => makeHouse(1.4, '#d6a070', '#e8e8e0'),
+      filter: (x, y) => y > 1 && y < 4,
+    }));
+    // Rocks on beach
+    g.add(scatter({
+      sampleHeight: sh, count: 20, range: 90, seed: 145,
+      factory: (r) => makeRock(0.4 + r() * 0.8, '#8a8278'),
+      filter: (x, y) => y > -0.5 && y < 2,
+      offsetY: -0.1,
+      randomScale: [0.7, 1.3],
+    }));
+    // A few boats offshore
+    for (let i = 0; i < 3; i++) {
+      const b = makeBoat(1.4);
+      b.position.set((Math.random() - 0.5) * 60, -0.05, -20 - Math.random() * 15);
+      b.rotation.y = Math.random() * Math.PI;
+      g.add(b);
+    }
+    return g;
+  },
+};
+
+// Attach decorators to landform objects by id.
+for (const lf of landforms) {
+  if (decorators[lf.id]) lf.decorate = decorators[lf.id];
+}
 
 export function getLandform(id) {
   return landforms.find(l => l.id === id);

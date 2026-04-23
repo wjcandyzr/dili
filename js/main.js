@@ -123,6 +123,14 @@ function loadLandform(id) {
   currentTerrain = buildTerrain(lf.terrain);
   scene.add(currentTerrain);
 
+  // Add decorations (trees, rocks, houses, clouds, etc.)
+  if (lf.decorate) {
+    const sampleHeight = currentTerrain.userData.sampleHeight;
+    const decor = lf.decorate(sampleHeight);
+    decor.name = 'decorations';
+    currentTerrain.add(decor);
+  }
+
   // Reset view to 3D whenever switching landform
   viewMgr.setMode('3d', currentTerrain);
   viewButtons.forEach(b => b.classList.toggle('active', b.dataset.view === '3d'));

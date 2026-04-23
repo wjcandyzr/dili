@@ -171,6 +171,16 @@ export function buildTerrain(config) {
   }
 
   group.userData.bounds = { size, yMin, yMax, minH, maxH };
+  // Expose sampleHeight so decorations can be placed on the real surface.
+  group.userData.sampleHeight = (x, z) => {
+    let y = heightFn(x, z);
+    if (microDetail > 0) {
+      y += fbm(x * microFrequency, z * microFrequency, {
+        octaves: 3, gain: 0.5, seed: microSeed,
+      }) * microDetail;
+    }
+    return y;
+  };
   return group;
 }
 
